@@ -11,7 +11,7 @@ pipe = Pipeline(parallel=True)
 RERUN = False  # Set to True to rerun all steps
 
 @pipe.AddFunction(rerun = RERUN)
-def pull_data(name, df, z_dir, fields, gridsize=[100,100,100], left_edge_kpc=[20,20,20], right_edge_kpc=[100,100,100]):
+def pull_data(name, df, halo_n, z_dir, fields, gridsize=[100,100,100], left_edge_kpc=[20,20,20], right_edge_kpc=[100,100,100]):
 
     # Load dataset and get center and virial quantities
     print(f"Loading dataset: {name}")
@@ -47,7 +47,7 @@ def pull_data(name, df, z_dir, fields, gridsize=[100,100,100], left_edge_kpc=[20
     tghyt.annotate_line([right_edge[0]-center[0], left_edge[1] - center[1]], [right_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
     tghyt.annotate_line([right_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
     tghyt.annotate_line([left_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], left_edge[1] - center[1]], coord_system='plot')
-    tghyt.save(f'../images/full_sphere_slice_{z_dir}.png')
+    tghyt.save(f'../images/full_sphere_slice_halo{halo_n}_{z_dir}.png')
 
     print("Data extraction complete.")
     return {
@@ -176,7 +176,6 @@ def list_to_dict(dicts, names):
         overarching_dict[n] = d
     return dict(overarching_dict)
 
-
 @pipe.AddFunction(rerun = RERUN)
 def pickle_data(dic, filename):
     with open(filename, 'wb') as f:
@@ -190,23 +189,28 @@ def main():
     halos = ["002392", "002878", "004123", "005016", "005036", "008508"]
     NUM_BINS = 200
 
-    collect_halos = []
-    for halo_n in halos:
-        z_dirs           = get_dirs(halo_n)
-        df               = read_halo_c_v(z_dirs, halo_n)
-        collect_redshifts = []
-        for redshift in target_redshifts:
-            name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
-            dic = pull_data(name, df, redshift, fields, gridsize = [200, 200, 200], left_edge_kpc=[-200,20,20], right_edge_kpc=[200,420,420])
-            dic2 = normalize_fields(dic)
-            dic3 = compute_power_spectrum(dic2)
-            dic4 = radial_average(dic3, num_bins=NUM_BINS)
-            if redshift == "RD0042" and halo_n == "004123": pickle_data(dic4, 'radially_averaged_power_spectrum.pkl')
-            collect_redshifts.append(dic4)
-        all_redshifts = list_to_dict(collect_redshifts, target_redshifts)
-        collect_halos.append(all_redshifts)
-    all_halos = list_to_dict(collect_halos, halos)
-    plot_power_spectrum(all_halos, savefile=f'radially_averaged_power_spectrum_total_{NUM_BINS}_better_bins.png')
+    left_edges_kpc = [[-125, -125, 20], [-125, -125, 270], [-125, -125, 520], [-125, -125, 770]]
+    right_edges_kpc = [[125, 125, 270], [125, 125, 520], [125, 125, 770], [125, 125, 1020]]
+
+    for n, (l_edge, r_edge) in enumerate(zip(left_edges_kpc, right_edges_kpc)):
+        collect_halos = []
+        for halo_n in halos:
+            z_dirs           = get_dirs(halo_n)
+            df               = read_halo_c_v(z_dirs, halo_n)
+            collect_redshifts = []
+            for redshift in target_redshifts:
+                name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
+                dic = pull_data(name, df, halo_n, redshift, fields, gridsize = [100, 100, 100], left_edge_kpc=l_edge, right_edge_kpc=r_edge)
+                dic2 = normalize_fields(dic)
+                dic3 = compute_power_spectrum(dic2)
+                dic4 = radial_average(dic3, num_bins=NUM_BINS)
+                collect_redshifts.append(dic4)
+            all_redshifts = list_to_dict(collect_redshifts, target_redshifts)
+            collect_halos.append(all_redshifts)
+        all_halos = list_to_dict(collect_halos, halos)
+
+        pickle_data(all_halos, f'radially_averaged_power_spectrum_zone{n}.pkl')
+        plot_power_spectrum(all_halos, savefile=f'radially_averaged_power_spectrum_total_zone{n}.png')
     pipe.run()
 
 main()
@@ -215,6 +219,9 @@ main()
 
 
 
+
+
+# if redshift == "RD0042" and halo_n == "004123": pickle_data(dic4, 'radially_averaged_power_spectrum.pkl')
 
     # # Write density FFT data to file
     # print("Writing density profile to file...")
