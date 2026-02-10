@@ -1,7 +1,7 @@
 #!/bin/bash --login
 
 #SBATCH --job-name=RerunAllAnalysis                                                                         # Job name
-#SBATCH --ntasks=120                                                                                         # Number of tasks   # SLURM defaults to 1 but we specify anyway
+#SBATCH --ntasks=30                                                                                         # Number of tasks   # SLURM defaults to 1 but we specify anyway
 #SBATCH --mem=800G                                                                                          # Memory per node   # Specify "M" or "G" for MB and GB respectively
 #SBATCH --time=03:59:00                                                                                     # Wall time         # Format: "minutes", "hours:minutes:seconds",      # "days-hours", or "days-hours:minutes"
 #SBATCH --output=/mnt/research/galaxies-REU/ticoras/investigate_perturbations/slurm_outputs/%x-%j-SLURM.out # %x: job name, %j: job ID
@@ -15,4 +15,4 @@ conda activate IONS_ENV
 directory="/mnt/research/galaxies-REU/ticoras/investigate_perturbations/FOGGIE_background_structures"
 cd "${directory}"
 
-mpirun -n 120 python perturbations_in_foggie_sims.py    
+mpirun -n 30 python perturbations_in_foggie_sims.py    

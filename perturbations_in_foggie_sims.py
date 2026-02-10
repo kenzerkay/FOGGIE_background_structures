@@ -11,8 +11,8 @@ pipe = Pipeline(parallel=True)
 RERUN = False  # Set to True to rerun all steps
 
 @pipe.AddFunction(rerun = RERUN)
-def pull_data(name, df, halo_n, z_dir, fields, gridsize=[100,100,100], left_edge_kpc=[20,20,20], right_edge_kpc=[100,100,100]):
-
+def pull_data(name, df, halo_n, z_dir, fields, gridsize=[100, 100, 100], left_edge_kpc=[20, 20, 20], right_edge_kpc=[100,100,100]):
+    
     # Load dataset and get center and virial quantities
     print(f"Loading dataset: {name}")
     ds = yt.load(name)
@@ -189,32 +189,38 @@ def main():
     halos = ["002392", "002878", "004123", "005016", "005036", "008508"]
     NUM_BINS = 200
 
-    left_edges_kpc = [[-125, -125, 20], [-125, -125, 270], [-125, -125, 520], [-125, -125, 770]]
-    right_edges_kpc = [[125, 125, 270], [125, 125, 520], [125, 125, 770], [125, 125, 1020]]
+    collect_halos = []
+    for halo_n in halos:
+        z_dirs           = get_dirs(halo_n)
+        df               = read_halo_c_v(z_dirs, halo_n)
+        collect_redshifts = []
+        for redshift in target_redshifts:
+            name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
+            dic = pull_data(name, df, halo_n, redshift, fields, gridsize = [100, 100, 100], left_edge_kpc=[-250, -250, 20], right_edge_kpc=[250, 250, 270])
+            dic2 = normalize_fields(dic)
+            dic3 = compute_power_spectrum(dic2)
+            dic4 = radial_average(dic3, num_bins=NUM_BINS)
+            collect_redshifts.append(dic4)
+        all_redshifts = list_to_dict(collect_redshifts, target_redshifts)
+        collect_halos.append(all_redshifts)
+    all_halos = list_to_dict(collect_halos, halos)
 
-    for n, (l_edge, r_edge) in enumerate(zip(left_edges_kpc, right_edges_kpc)):
-        collect_halos = []
-        for halo_n in halos:
-            z_dirs           = get_dirs(halo_n)
-            df               = read_halo_c_v(z_dirs, halo_n)
-            collect_redshifts = []
-            for redshift in target_redshifts:
-                name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
-                dic = pull_data(name, df, halo_n, redshift, fields, gridsize = [100, 100, 100], left_edge_kpc=l_edge, right_edge_kpc=r_edge)
-                dic2 = normalize_fields(dic)
-                dic3 = compute_power_spectrum(dic2)
-                dic4 = radial_average(dic3, num_bins=NUM_BINS)
-                collect_redshifts.append(dic4)
-            all_redshifts = list_to_dict(collect_redshifts, target_redshifts)
-            collect_halos.append(all_redshifts)
-        all_halos = list_to_dict(collect_halos, halos)
-
-        pickle_data(all_halos, f'radially_averaged_power_spectrum_zone{n}.pkl')
-        plot_power_spectrum(all_halos, savefile=f'radially_averaged_power_spectrum_total_zone{n}.png')
+    pickle_data(all_halos, f'radially_averaged_power_spectrum_zone.pkl')
+    plot_power_spectrum(all_halos, savefile=f'radially_averaged_power_spectrum_total_zone.png')
     pipe.run()
 
 main()
 
+
+
+
+
+
+
+    # left_edges_kpc = [[-125, -125, 20], [-125, -125, 270], [-125, -125, 520], [-125, -125, 770]]
+    # right_edges_kpc = [[125, 125, 270], [125, 125, 520], [125, 125, 770], [125, 125, 1020]]
+
+    # for n, (l_edge, r_edge) in enumerate(zip(left_edges_kpc, right_edges_kpc)):
 
 
 
