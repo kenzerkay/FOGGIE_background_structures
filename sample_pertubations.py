@@ -1,8 +1,10 @@
+import pickle
+
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from ndustria import Pipeline
-import pickle
+
 from scipy.interpolate import interp1d
 
 # Initialize Common Variables on Import
@@ -105,11 +107,9 @@ def create_filamentary_structure(data, smoothing_scale=20.0):
     print("Computing eigenvalues of Hessian matrix at each grid point...")
     # Diagonalize Hessian to get eigenvalues at each point
     # This allows T-web classification: filaments, sheets, nodes, voids
-    
     # Reshape Hessian components for efficient eigenvalue computation
     shape = H_xx.shape
     n_points = np.prod(shape)
-    
     # Construct symmetric 3x3 Hessian matrices for all points
     # Shape: (n_points, 3, 3)
     hessian_matrices = np.zeros((n_points, 3, 3))
@@ -119,15 +119,12 @@ def create_filamentary_structure(data, smoothing_scale=20.0):
     hessian_matrices[:, 0, 1] = hessian_matrices[:, 1, 0] = H_xy.flatten()
     hessian_matrices[:, 0, 2] = hessian_matrices[:, 2, 0] = H_xz.flatten()
     hessian_matrices[:, 1, 2] = hessian_matrices[:, 2, 1] = H_yz.flatten()
-    
     # Compute eigenvalues for all points (sorted in ascending order)
     eigenvalues = np.linalg.eigvalsh(hessian_matrices)  # Shape: (n_points, 3)
-    
     # Reshape back to 3D grid, with eigenvalues sorted: λ₃ ≤ λ₂ ≤ λ₁
     lambda_3 = eigenvalues[:, 0].reshape(shape)
     lambda_2 = eigenvalues[:, 1].reshape(shape)
     lambda_1 = eigenvalues[:, 2].reshape(shape)
-    
     # T-web classification based on number of eigenvalues above threshold
     # Threshold = 0 (using sign of eigenvalues for cosmic web morphology)
     # Filament: λ₁ > 0, λ₂ > 0, λ₃ < 0 (collapse in 2 directions, expansion in 1)
@@ -152,10 +149,9 @@ def create_filamentary_structure(data, smoothing_scale=20.0):
     print(f"  Nodes:     {is_node.sum()/n_points*100:.1f}%")
 
     print("Tune density field to emphasize certain cosmic web structures...")
-    
     # Create weighted field that emphasizes filaments
     delta_field_smooth = np.fft.ifftn(fft_smoothed).real
-    
+
     # Weight by structure type: filaments get highest weight (if desired)
     structure_weight = np.zeros(shape)
     structure_weight[is_void] = 1.0     # Suppress voids
@@ -194,7 +190,7 @@ def overlay_baryon_density_profile(data, grid_size=[200,200,200]):
     profile_density = profile_data[:, 1]  # median density in g/cm^3
 
     # Interpolate density at each grid point
-    density_interpolator = interp1d(profile_radius, profile_density, kind='linear', bounds_error=False, fill_value=(profile_density[0], profile_density[-1]))
+    density_interpolator = interp1d(profile_radius, profile_density, kind='linear', bounds_error=False, fill_value="extrapolate")
     background_density = density_interpolator(radius_3d)
 
     fig, ax = plt.subplots(figsize=(8,6))

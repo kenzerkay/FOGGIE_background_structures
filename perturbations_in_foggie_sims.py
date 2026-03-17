@@ -1,10 +1,21 @@
+"""
+This script processes simulation data from the FOGGIE project to analyze perturbations in the circumgalactic medium (CGM). It performs the following steps:
+1. Loads simulation datasets and creates a uniform 3D grid offest from the center as to not indlude the disk (only utilizing CGM)
+2. Normalizes fields by their respective profiles and means  to isolate fluctuations.
+3. Computes the 3D Fourier transform of the normalized fields to obtain power spectra.
+4. Radially averages the power spectra to analyze the distribution of perturbations across different scales.
+5. Plots the radially averaged power spectra for density and temperature across different halos and redshifts.
+6. Saves the processed data and plots for further analysis.
+"""
+
+import pickle
+
 import yt
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from ndustria import Pipeline
 from SetUp import get_center, get_dirs, read_halo_c_v
-import pickle
 
 # Initialize Common Variables on Import
 pipe = Pipeline(parallel=True)
@@ -12,7 +23,7 @@ RERUN = False  # Set to True to rerun all steps
 
 @pipe.AddFunction(rerun = RERUN)
 def pull_data(name, df, halo_n, z_dir, fields, gridsize=[100, 100, 100], left_edge_kpc=[20, 20, 20], right_edge_kpc=[100,100,100]):
-    
+
     # Load dataset and get center and virial quantities
     print(f"Loading dataset: {name}")
     ds = yt.load(name)
@@ -91,7 +102,7 @@ def compute_power_spectrum(dic):
     for key in dic["normalized"]:
         print(f"Computing power spectrum for {key}...")
         fft = np.fft.fftn(dic["normalized"][key])
-        dic['fft_mag'][key] = np.sqrt(np.abs(fft)**2) # magnitude squared to include both imaginary and real parts) 
+        dic['fft_mag'][key] = np.sqrt(np.abs(fft)**2) # magnitude squared to include both imaginary and real parts)
 
     # To convert to physical units, divide by box size
     print("Converting FFTs to physical units...")
@@ -119,7 +130,6 @@ def radial_average(dic, num_bins=300):
     print(np.nanmin(l_mag_flat), np.nanmax(l_mag_flat))
     l_bins = np.linspace(dic["cell_depth"].to('kpc').value*4 , dic["box_size"].to('kpc').value/2, num_bins)  # Define bins
     dic["l_centers"] = 0.5 * (l_bins[:-1] + l_bins[1:])  # Bin centers
-    
     dic['fft_mag_binned'] = {}
     for key in dic['fft_mag']:
         fft_mag_flat = dic['fft_mag'][key].flatten()
@@ -131,18 +141,36 @@ def radial_average(dic, num_bins=300):
             if np.any(mask):
                 dic["fft_mag_binned"][key][i] = np.nanmean(fft_mag_flat[mask]) # Get the mean power spectrum for this bin (use nanmean to avoid NaNs)
 
-    return dic 
+    return dic
 
 @pipe.AddFunction(rerun = RERUN)
 def plot_power_spectrum(dic_list, savefile='radially_averaged_power_spectrum.png'):
-    
+    """
+    Plot the radially averaged power spectra for density and temperature from the provided dictionary list.
+
+    Parameters:
+        dic_list (dict): A dictionary containing the radially averaged power spectra for each halo and redshift. The structure should be:
+            {
+                halo_n: {
+                    redshift: {
+                        "l_centers": array of bin centers,
+                        "fft_mag_binned": {
+                            "density": array of binned power spectrum values for density,
+                            "temperature": array of binned power spectrum values for temperature
+                        }
+                    },
+                    ...
+                },
+                ...            }
+        savefile (str): The filename where the plot will be saved. Default is '
+    """
     print("Plotting power spectra...")
 
     fig, ax = plt.subplots(len(dic_list), 2, figsize=(12, 12), sharex=True, sharey=True)
     fig.suptitle('Density (left) and Temperature (right) Power Spectra', fontsize=18)
     fig.supxlabel('Distance Scale (kpc)', fontsize=16)
     fig.supylabel('Normalized Magnitude', fontsize=16)
- 
+
     for n, halo_n in enumerate(dic_list):
         dic_halo = dic_list[halo_n]
         for redshift in dic_halo:
@@ -156,7 +184,7 @@ def plot_power_spectrum(dic_list, savefile='radially_averaged_power_spectrum.png
                 normalized_data = data / np.max(data)
                 ax[n, i].plot(dic["l_centers"], normalized_data, label=f'(z={redshift})')
                 ax[n, i].legend(fontsize=10)
-        
+
     fig.tight_layout()
     fig.savefig(savefile, dpi=150)
 
@@ -178,11 +206,21 @@ def list_to_dict(dicts, names):
 
 @pipe.AddFunction(rerun = RERUN)
 def pickle_data(dic, filename):
+    """
+    Pickle a dictionary and save it to a file.
+
+    Parameters:
+        dic (dict): The dictionary to be pickled and saved to a file.
+        filename (str): The name of the file where the pickled dictionary will be saved
+    """
     with open(filename, 'wb') as f:
         pickle.dump(dic, f)
-    return 0
+    return
 
 def main():
+    """
+    Main function to process simulation data, compute power spectra, and generate plots.
+    """
     # Define simulation dataset info
     fields = ['density', 'temperature']
     target_redshifts = ["RD0016", "RD0020", "RD0027", "RD0032", "RD0042"]
@@ -205,100 +243,8 @@ def main():
         collect_halos.append(all_redshifts)
     all_halos = list_to_dict(collect_halos, halos)
 
-    pickle_data(all_halos, f'radially_averaged_power_spectrum_zone.pkl')
-    plot_power_spectrum(all_halos, savefile=f'radially_averaged_power_spectrum_total_zone.png')
+    pickle_data(all_halos, 'radially_averaged_power_spectrum.pkl')
+    plot_power_spectrum(all_halos, savefile='radially_averaged_power_spectrum_total.png')
     pipe.run()
 
 main()
-
-
-
-
-
-
-
-    # left_edges_kpc = [[-125, -125, 20], [-125, -125, 270], [-125, -125, 520], [-125, -125, 770]]
-    # right_edges_kpc = [[125, 125, 270], [125, 125, 520], [125, 125, 770], [125, 125, 1020]]
-
-    # for n, (l_edge, r_edge) in enumerate(zip(left_edges_kpc, right_edges_kpc)):
-
-
-
-
-
-
-# if redshift == "RD0042" and halo_n == "004123": pickle_data(dic4, 'radially_averaged_power_spectrum.pkl')
-
-    # # Write density FFT data to file
-    # print("Writing density profile to file...")
-    # with open('../data/density_profile.txt', 'w') as f:
-    #     f.write("#radius\tdensity\n")
-    #     for x, y in zip(dic["profile_plots"]["radius"], dic["profile_plots"]["density"]):
-    #         f.write(f"{x}\t{y}\n")
-
-
-            # Mask data to only include valid range
-            # l_min = dic["cell_depth"].to('kpc').value*4
-            # l_max = dic["box_size"].to('kpc').value/2
-            # mask = (dic["l_centers"] >= l_min) & (dic["l_centers"] <= l_max)
-            # l_centers_masked = dic["l_centers"][mask]
-
-
-    # # Perform 3D Fourier transform (convert to plain numpy array first)
-    # print("Computing 3D Fourier transforms...")
-    # fft_density = np.fft.fftn(dic["normalized"]["density"])
-    # fft_temperature = np.fft.fftn(dic["normalized"]["temperature"])
-    # # magnitude squared to include both imaginary and real parts) 
-    # dic['fft_mag_density'] = np.sqrt(np.abs(fft_density)**2)
-    # dic['fft_mag_temperature'] = np.sqrt(np.abs(fft_temperature)**2)  
-
-
-
-    # # Plot slices to verify normalization 
-    # print("Plotting slices to verify normalization...")
-    # fig, ax = plt.subplots(2,2, figsize=(12, 6))
-    # im = ax[0,0].imshow(np.sum(dic["grid"]["density"], axis=2).T * dic["cell_depth"], extent = [-dic["box_size"]/2, dic["box_size"]/2, -dic["box_size"]/2, dic["box_size"]/2], origin='lower', cmap='viridis', norm=LogNorm())
-    # fig.colorbar(im, ax=ax[0,0], label='Density (g/cm^3)')
-    # im2 = ax[0,1].imshow(np.sum(dic["normalized"]["density"], axis=2).T, extent = [-dic["box_size"]/2, dic["box_size"]/2, -dic["box_size"]/2, dic["box_size"]/2], origin='lower', cmap='viridis')
-    # fig.colorbar(im2, ax=ax[0,1], label='Normalized Density')
-    # im3 = ax[1,0].imshow(np.sum(dic["grid"]["temperature"], axis=2).T * dic["cell_depth"], extent = [-dic["box_size"]/2, dic["box_size"]/2, -dic["box_size"]/2, dic["box_size"]/2], origin='lower', cmap='inferno', norm=LogNorm())
-    # fig.colorbar(im3, ax=ax[1,0], label='Temperature (K)')
-    # im4 = ax[1,1].imshow(np.sum(dic["normalized"]["temperature"], axis=2).T, extent = [-dic["box_size"]/2, dic["box_size"]/2, -dic["box_size"]/2, dic["box_size"]/2], origin='lower', cmap='inferno')
-    # fig.colorbar(im4, ax=ax[1,1], label='Normalized Temperature')
-    # fig.savefig('normalization_slices.png', dpi=150, bbox_inches='tight')
-
-
-    # # Write density FFT data to file
-    # print("Writing density profile to file...")
-    # with open('density_profile.txt', 'w') as f:
-    #     f.write("#radius\tdensity\n")
-    #     for x, y in zip(profile_radius, density_profile):
-    #         f.write(f"{x}\t{y}\n")
-
-
-    # "density_profile": {"radius": profile_plots.profiles[0].x.to("kpc"), "density": profile_plots.profiles[0]["gas", "density"].to('g/cm**3')},
-    # "temperature_profile": {"radius": profile_plots.profiles[0].x.to("kpc") , "temperature": profile_plots.profiles[0]["gas", "temperature"].to('K')},
-
-
-    # print("Generating projection plot for verification...")
-    # tghyt = yt.ProjectionPlot(ds, 'z', ('gas', 'density'), center=center, width=(outer_edge_kpc*4, 'kpc'), data_source=sph)
-    # # Draw box with 4 lines
-    # tghyt.annotate_line([left_edge[0]-center[0], left_edge[1] - center[1]], [right_edge[0]-center[0], left_edge[1] - center[1]], coord_system='plot')
-    # tghyt.annotate_line([right_edge[0]-center[0], left_edge[1] - center[1]], [right_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
-    # tghyt.annotate_line([right_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
-    # tghyt.annotate_line([left_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], left_edge[1] - center[1]], coord_system='plot')
-    # tghyt.save('full_sphere_projection.png')
-
-
-    # density_plot = yt.ProfilePlot(sph, ("index", "radius"), ("gas", "density"), n_bins=128, weight_field=None, x_log = False)  
-    # density_profile = density_plot.profiles[0]
-    # temperature_plot = yt.ProfilePlot(sph, ("index", "radius"), ("gas", "temperature"), n_bins=128, weight_field=None, x_log = False)  
-    # temperature_profile = temperature_plot.profiles[0]
-
-    # box = ds.region(center, left_edge, right_edge)
-    # yt.ProjectionPlot(ds, 'z', ('gas', 'density'), center=center, width=(1000, 'kpc'), data_source=box).save('box_projection.png')
-    
-    
-
-    # print(left_edge-center, right_edge-center)
-    # yt.ProjectionPlot(ds, 'z', ('gas', 'density'), center=center, width=(190, 'kpc'), data_source=box).save('test_box_projection.png')
