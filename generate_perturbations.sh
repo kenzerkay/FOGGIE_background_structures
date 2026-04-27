@@ -12,7 +12,8 @@ source activate /mnt/ffs24/home/scottm59/miniforge3/
 conda activate IONS_ENV
 
 # Open to directory
-directory="/mnt/research/galaxies-REU/ticoras/investigate_perturbations/FOGGIE_background_structures"
+directory="/mnt/research/galaxies-REU/ticoras/investigate_perturbations/profiles"
 cd "${directory}"
 
-mpirun -n 30 python perturbations_in_foggie_sims.py    
+# mpirun -n 30 python perturbations_in_foggie_sims.py    
+mpirun -n 6 python ../FOGGIE_background_structures/smooth_FOGGIE_profiles.py

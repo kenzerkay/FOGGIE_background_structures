@@ -9,7 +9,19 @@ from scipy.interpolate import interp1d
 
 # Initialize Common Variables on Import
 pipe = Pipeline(parallel=True)
-RERUN = False  # Set to True to rerun all steps
+RERUN = True  # Set to True to rerun all steps
+
+def pickle_data(dic, filename):
+    """
+    Pickle a dictionary and save it to a file.
+
+    Parameters:
+        dic (dict): The dictionary to be pickled and saved to a file.
+        filename (str): The name of the file where the pickled dictionary will be saved
+    """
+    with open(filename, 'wb') as f:
+        pickle.dump(dic, f)
+    return
 
 @pipe.AddFunction(rerun = RERUN)
 def read_perturbation_data(filename, halo_n = "004123", z_dir = "RD0016"):
@@ -207,6 +219,8 @@ def overlay_baryon_density_profile(data, grid_size=[200,200,200]):
     delta_field = delta_field - delta_field.mean()
     delta_field = np.clip(delta_field, -0.99, None)
     density_field = background_density * (1 + delta_field)
+
+    pickle_data(density_field, 'sampled_density_field.pkl')
 
     fig, ax = plt.subplots(figsize=(8,6))
     im = ax.imshow(density_field[:, :, density_field.shape[2]//2], extent=[-box_size_value/2, box_size_value/2, -box_size_value/2, box_size_value/2], norm=LogNorm())

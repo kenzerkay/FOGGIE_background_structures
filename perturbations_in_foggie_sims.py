@@ -234,7 +234,7 @@ def main():
         collect_redshifts = []
         for redshift in target_redshifts:
             name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
-            dic = pull_data(name, df, halo_n, redshift, fields, gridsize = [100, 100, 100], left_edge_kpc=[-250, -250, 20], right_edge_kpc=[250, 250, 270])
+            dic = pull_data(name, df, halo_n, redshift, fields, gridsize = [75, 75, 75], left_edge_kpc=[-100, -100, 20], right_edge_kpc=[100, 100, 220])
             dic2 = normalize_fields(dic)
             dic3 = compute_power_spectrum(dic2)
             dic4 = radial_average(dic3, num_bins=NUM_BINS)
