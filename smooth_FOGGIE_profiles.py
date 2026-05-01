@@ -18,47 +18,18 @@ def density_cutoff(r_kpc):
     alpha = -4
     return rho0 * (r_kpc / r0)**alpha
 
-def calculate_median_and_mean_profiles(dic):
-    """Calculate median and mean density profiles from the histogram data.
-
-    Parameters:
-        dic (dict): A dictionary containing the radius, density, weights, and bin information.
-    Returns:
-        tuple: A tuple containing the median profile, mean profile, and radius bin centers.
-    """
-    bin_indices = np.digitize(dic['Radius'], dic['Radius_Bins'])
-    y_data = np.log10(dic['Density'])
-    
-    median_profile, mean_profile = [], []
-    for i in range(1,len(dic['Radius_Bins'])):
-        values = 10**y_data[np.where(bin_indices==i)[0]]
-        idx = np.where(bin_indices==i)[0]
-        if (len(idx)==0):
-            mean_profile.append(np.nan)
-            median_profile.append(np.nan)
-            continue
-        mean_profile.append(np.mean(values))
-        median_profile.append(np.median(values))
-    radius_bin_centers = 0.5*np.diff(dic['Radius_Bins'])+dic['Radius_Bins'][1:]
-
-    return median_profile, mean_profile, radius_bin_centers
-
 @pipe.AddFunction(rerun = RERUN)
-def make_histogram_profile_plots(name, df, fields, halo_n, z_dir, weighted=False):
+def extract_sim_data(name, df, z_dir, weight_field=None):
 
     # Load in data 
     ds = yt.load(name)
     center = get_center(z_dir, df, ds)
-    vir_mass, vir_radius, vir_temp = pull_virial_quantities(ds, halo_n, z_dir)
-    sphere = ds.sphere(center=center, radius=(300, 'kpc')) # 5*vir_radius
+    sphere = ds.sphere(center=center, radius=(300, 'kpc'))
     
-    # Define radius bins for the profile plot.
-    radius_range = [5.0, 250.0] # kpc
-    radius_bins = np.linspace(radius_range[0], radius_range[1], 200)
-
     # Radius and density data for the profile plot.
     radius_dat = sphere['index','radius'].in_units('kpc').v
     density_dat = sphere['gas','density'].in_units('g/cm**3').v
+    pressure_dat = sphere['gas','pressure'].in_units('g/cm/s**2').v
 
     # Evautate density cutoff for every cell 
     rho_cutoff = density_cutoff(radius_dat)
@@ -68,77 +39,145 @@ def make_histogram_profile_plots(name, df, fields, halo_n, z_dir, weighted=False
     # This is so we can keep out large satellite galaxies and focus on the diffuse CGM (our galaxies will be isolated).
     radius_data = radius_dat[keep]
     density_data = density_dat[keep]
+    pressure_data = pressure_dat[keep]
+
     cut_radius_data = radius_dat[keep == False]
     cut_data = density_dat[keep == False]
+    pressure_cut_data = pressure_dat[keep == False]
 
-    if weighted:
-        weight_data = sphere['gas','cell_mass'].in_units('Msun').v
-        weight_label = 'Mass'
-    else:
-        # Unweighted profile: every cell contributes equally.
+    # Decide if we want to weight the histogram by a field (e.g. mass) or not (i.e. all cells count equally).
+    if weight_field is None:
         weight_data = np.ones_like(radius_data)
-        weight_label = 'Cell Count'
-    cmin = np.min(np.array(weight_data)[np.nonzero(weight_data)[0]])
-
-    dictionary = {'Radius': radius_data, 'Density': density_data, 'Cut_Radius': cut_radius_data, 'Cut_Density': cut_data, 'Weight': weight_data, 'cmin': cmin, 'Radius_Bins': radius_bins, 'Radius_Range': radius_range}
-    return dictionary
-
-@pipe.AddFunction(rerun = RERUN)
-def plot_histogram_profile(dic, redshift, halo_n):
-
-    fig, ax = plt.subplots(figsize=(10,8), dpi=300)
-    ax.set_xlabel('$R$ [kpc]', fontsize=20)
-
-    bin_indices = np.digitize(dic['Radius'], dic['Radius_Bins'])
-    y_data = np.log10(dic['Density'])
-    removed_data = np.log10(dic['Cut_Density'])
-    y_bins = np.linspace(-32, -21, 200)
-
-    ax.hist2d(dic['Radius'], y_data, weights=dic['Weight'], bins=(dic['Radius_Bins'], y_bins), cmin=dic['cmin'], cmap=plt.cm.BuPu, norm=mpl.colors.LogNorm())
-    ax.hist2d(dic['Cut_Radius'], removed_data, bins=(dic['Radius_Bins'], y_bins), cmap=plt.cm.Greys, norm=mpl.colors.LogNorm())
-    
-    median_profile, mean_profile, radius_bin_centers = calculate_median_and_mean_profiles(dic)
-
-    ax.plot(radius_bin_centers, np.log10(density_cutoff(radius_bin_centers)), 'r-', lw=2, label='Density Cutoff')
-    ax.plot(radius_bin_centers, np.log10(np.array(median_profile)), 'k-', lw=2, label='Median')
-    ax.plot(radius_bin_centers, np.log10(np.array(mean_profile)), 'k--', lw=2, label='Mean')
-    ax.axis([dic['Radius_Range'][0], dic['Radius_Range'][1], -32, -21])
-    ax.legend(loc='upper center',fontsize=16, frameon=False, ncol=2)
-
-    fig.savefig(f"density_profiles_{redshift}_{halo_n}.png") 
-
-    return {"median_profile": median_profile, "mean_profile": mean_profile, "radius_bin_centers": radius_bin_centers}
+    else:
+        weight_data = sphere[weight_field][keep]
+        
+    return {'Radius': radius_data, 
+            'Density': density_data, 
+            'Pressure': pressure_data,
+            'Cut_Radius': cut_radius_data, 
+            'Cut_Density': cut_data,
+            'Cut_Pressure': pressure_cut_data,
+            'Weight': weight_data}
 
 @pipe.AddFunction(rerun = RERUN)
-def collect_profiles_plot(profiles, target_redshifts, halos):
+def calculate_profiles(dic):
+    """Calculate median and mean density profiles from the histogram data.
+
+    Parameters:
+        dic (dict): Dictionary containing the extracted simulation data.
+        redshift (str): Redshift identifier for labeling.
+        halo_n (str): Halo identifier for labeling.
+    Returns:
+        dict: A dictionary containing the median profile, mean profile, and radius bin centers.
+    """
+
+    # Define radius bins for the profile plot.
+    radius_bins = np.linspace(5.0, 250.0, 200)
+
+    # Bin the radius data and calculate the log10 of the density data for the histogram.
+    bin_indices = np.digitize(dic['Radius'], radius_bins)
+    density_data = np.log10(dic['Density'])
+    pressure_data = np.log10(dic['Pressure'])
+
+    # Calculate the median and mean density profiles for each radius bin.
+    median_density = np.full(len(radius_bins) - 1, np.nan, dtype=float)
+    mean_density = np.full(len(radius_bins) - 1, np.nan, dtype=float)
+    median_pressure = np.full(len(radius_bins) - 1, np.nan, dtype=float)
+    mean_pressure = np.full(len(radius_bins) - 1, np.nan, dtype=float)
+
+    for i in range(1, len(radius_bins)):
+        mask = (bin_indices == i)
+        if not np.any(mask):
+            continue
+        values = 10.0 ** density_data[mask]
+        pressure_values = 10.0 ** pressure_data[mask]
+        mean_density[i-1] = np.mean(values)
+        median_density[i-1] = np.median(values)
+        mean_pressure[i-1] = np.mean(pressure_values)
+        median_pressure[i-1] = np.median(pressure_values)
+
+    radius_bin_centers = 0.5*np.diff(radius_bins)+radius_bins[1:]
+
+    return dic | {"Radius_bins": radius_bins, 
+                  "bin_indices": bin_indices, 
+                  "median_density": median_density, 
+                  "mean_density": mean_density, 
+                  "median_pressure": median_pressure,
+                  "mean_pressure": mean_pressure,
+                  "radius_bin_centers": radius_bin_centers}
+
+@pipe.AddFunction(rerun = RERUN)
+def plot_histogram_profile(dic):
+
+    fig, axes = plt.subplots(len(dic), 2, figsize=(12, 20), dpi=300)
+    for i, halo in enumerate(dic.keys()):
+        for redshift in dic[halo].keys():
+            
+            data = dic[halo][redshift]
+            density_bins = np.linspace(-32, -21, 100)
+            pressure_bins = np.linspace(-19, -11, 100)
+
+            ax = axes[i, 0]
+            ax.set_title(f"Halo {halo} at Redshift {redshift}", fontsize=16)
+            ax.hist2d(data['Radius'], np.log10(data['Density']), weights=data['Weight'], bins=(data['Radius_bins'], density_bins), cmin= np.min(np.array(data['Weight'])[np.nonzero(data['Weight'])[0]]), cmap=plt.cm.BuPu, norm=mpl.colors.LogNorm())
+            ax.hist2d(data['Cut_Radius'], np.log10(data['Cut_Density']), bins=(data['Radius_bins'], density_bins), cmap=plt.cm.Greys, norm=mpl.colors.LogNorm(), alpha=0.5)
+            ax.plot(data['radius_bin_centers'], np.log10(density_cutoff(data['radius_bin_centers'])), 'r-', lw=2, label='Density Cutoff')
+            ax.plot(data['radius_bin_centers'], np.log10(np.array(data['median_density'])), 'k-', lw=2, label='Median')
+            ax.plot(data['radius_bin_centers'], np.log10(np.array(data['mean_density'])), 'k--', lw=2, label='Mean')
+            ax.axis([data['Radius_bins'].min(), data['Radius_bins'].max(), -32, -21])
+            ax.legend(loc='upper center',fontsize=16, frameon=False, ncol=2)
+
+            ax = axes[i, 1]
+            ax.set_title(f"Halo {halo} at Redshift {redshift}", fontsize=16)
+            ax.hist2d(data['Radius'], np.log10(data['Pressure']), weights=data['Weight'], bins=(data['Radius_bins'], pressure_bins), cmin= np.min(np.array(data['Weight'])[np.nonzero(data['Weight'])[0]]), cmap=plt.cm.BuPu, norm=mpl.colors.LogNorm())
+            ax.hist2d(data['Cut_Radius'], np.log10(data['Cut_Pressure']), bins=(data['Radius_bins'], pressure_bins), cmap=plt.cm.Greys, norm=mpl.colors.LogNorm(), alpha=0.5)
+            ax.plot(data['radius_bin_centers'], np.log10(np.array(data['median_pressure'])), 'k-', lw=2, label='Median')
+            ax.plot(data['radius_bin_centers'], np.log10(np.array(data['mean_pressure'])), 'k--', lw=2, label='Mean')
+            ax.axis([data['Radius_bins'].min(), data['Radius_bins'].max(), -19, -11])
+            ax.legend(loc='upper center',fontsize=16, frameon=False, ncol=2)
+
+    fig.tight_layout()
+    fig.savefig(f"density_and_pressure_profiles.png")
+
+@pipe.AddFunction(rerun = RERUN)
+def collect_profiles_plot(dic, red):
     """Collect median and mean profiles across halos and redshifts for comparison.
     """
 
-    Average_median_profile = np.zeros_like(profiles[halos[0]][target_redshifts[0]]["median_profile"])
-    for halo in halos:
-        profile = profiles[halo][target_redshifts[0]]
-        median_profile = profile["median_profile"]
-        Average_median_profile += np.array(median_profile)
-    Average_median_profile /= len(halos)
+    # Average the median profiles across all halos for the target redshift.
+    average_median_density = np.zeros_like(dic[list(dic.keys())[0]][red]["median_density"])
+    average_median_pressure = np.zeros_like(dic[list(dic.keys())[0]][red]["median_pressure"])
+    for i, halo in enumerate(dic.keys()):
+        profile        = dic[halo][red]
+        median_density = profile["median_density"]
+        average_median_density += np.array(median_density)
+        average_median_pressure += np.array(profile["median_pressure"])
+    average_median_density /= len(dic)
+    average_median_pressure /= len(dic)
 
-
-    f = open(f"average_median_profile_{target_redshifts[0]}.txt", 'w')
-    f.write('# radius (kpc)  Average Median Density (g/cm**3)\n')
-    for i in range(len(profiles[halos[0]][target_redshifts[0]]["median_profile"])):
-        f.write('%.3f             %.3e\n' % (profiles[halos[0]][target_redshifts[0]]["radius_bin_centers"][i], Average_median_profile[i]))
+    # Save the average median profile to a text file.
+    f = open(f"average_median_profile_{red}.txt", 'w')
+    f.write('# radius (kpc)  Average Median Density (g/cm**3)  Average Median Pressure (erg/cm**3)\n')
+    for i in range(len(dic[list(dic.keys())[0]][red]["median_density"])):
+        f.write('%.3f             %.3e             %.3e\n' % (dic[list(dic.keys())[0]][red]["radius_bin_centers"][i], average_median_density[i], average_median_pressure[i]))
     f.close()
+    
+    # Plot the median profiles for each halo and the average median profile for the target redshift.
+    fig, ax = plt.subplots(2, 1, figsize=(10,8), dpi=300)  
+    ax[0].set_xlim(5, 250)
+    ax[0].set_xlabel('$R$ [kpc]', fontsize=20)
+    for i, halo in enumerate(dic.keys()):
+        ax[0].plot(dic[halo][red]["radius_bin_centers"], dic[halo][red]["median_density"], color='red', alpha=0.7, lw=2, label=f'{halo} Median') 
+    ax[0].plot(dic[list(dic.keys())[0]][red]["radius_bin_centers"], average_median_density, color='black', lw=2, label='Average Median')
 
-    fig, ax = plt.subplots(figsize=(10,8), dpi=300)  
-    ax.set_xlim(5, 250)
-    ax.set_xlabel('$R$ [kpc]', fontsize=20)
-    ax.plot(profiles[halos[0]][target_redshifts[0]]["radius_bin_centers"], profiles[halos[0]][target_redshifts[0]]["median_profile"], color='magenta', alpha=0.7, lw=2, label=f'{halos[0]} Median')
-    ax.plot(profiles[halos[1]][target_redshifts[0]]["radius_bin_centers"], profiles[halos[1]][target_redshifts[0]]["median_profile"], color='magenta', alpha=0.7, lw=2, label=f'{halos[1]} Median')
-    ax.plot(profiles[halos[2]][target_redshifts[0]]["radius_bin_centers"], profiles[halos[2]][target_redshifts[0]]["median_profile"], color='magenta', alpha=0.7, lw=2, label=f'{halos[2]} Median')
-    ax.plot(profiles[halos[3]][target_redshifts[0]]["radius_bin_centers"], profiles[halos[3]][target_redshifts[0]]["median_profile"], color='magenta', alpha=0.7, lw=2, label=f'{halos[3]} Median')
-    ax.plot(profiles[halos[4]][target_redshifts[0]]["radius_bin_centers"], profiles[halos[4]][target_redshifts[0]]["median_profile"], color='magenta', alpha=0.7, lw=2, label=f'{halos[4]} Median')
-    ax.plot(profiles[halos[5]][target_redshifts[0]]["radius_bin_centers"], profiles[halos[5]][target_redshifts[0]]["median_profile"], color='magenta', alpha=0.7, lw=2, label=f'{halos[5]} Median')    
-    ax.plot(profiles[halos[0]][target_redshifts[0]]["radius_bin_centers"], Average_median_profile, color='black', lw=2, label='Average Median')
-    fig.savefig(f"average_density_profiles_{target_redshifts[0]}.png")
+    ax[1].set_xlim(5, 250)
+    ax[1].set_xlabel('$R$ [kpc]', fontsize=20)
+    for i, halo in enumerate(dic.keys()):
+        ax[1].plot(dic[halo][red]["radius_bin_centers"], dic[halo][red]["median_pressure"], color='blue', alpha=0.7, lw=2, label=f'{halo} Mean')
+    ax[1].plot(dic[list(dic.keys())[0]][red]["radius_bin_centers"], average_median_pressure, color='black', lw=2, label='Average Median')
+    fig.savefig(f"average_density_profiles_{red}.png")
+
+    return 
 
 @pipe.AddFunction(rerun = RERUN)
 def list_to_dict(dicts, names):
@@ -161,8 +200,7 @@ def main():
     Main function to process simulation data, compute power spectra, and generate plots.
     """
     # Define simulation dataset info
-    fields = ['density', 'pressure']
-    target_redshifts = ["RD0042"] #, "RD0020", "RD0027", "RD0032", "RD0042"]
+    target_redshifts = ["RD0042"] # ["RD0016" ,"RD0020", "RD0027", "RD0032", "RD0042"]
     halos = ["002392", "002878", "004123", "005016", "005036", "008508"]
     NUM_BINS = 200
 
@@ -170,54 +208,18 @@ def main():
     for halo_n in halos:
         z_dirs           = get_dirs(halo_n)
         df               = read_halo_c_v(z_dirs, halo_n)
-        collect_profiles = []
+        collect_redshifts = []
         for redshift in target_redshifts:
             name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
-            dictionary = make_histogram_profile_plots(name, df, fields, halo_n, redshift, weighted=False)
-            profile = plot_histogram_profile(dictionary, redshift, halo_n)
-            collect_profiles.append(profile)
-        profiles_dict = list_to_dict(collect_profiles, target_redshifts)
-        collect_halos.append(profiles_dict)
-    All_profiles_dict = list_to_dict(collect_halos, halos)
-    collect_profiles_plot(All_profiles_dict, target_redshifts, halos)
-
+            dictionary = extract_sim_data(name, df, redshift, weight_field=None)
+            dictionary = calculate_profiles(dictionary)
+            collect_redshifts.append(dictionary)
+        redshift_dict = list_to_dict(collect_redshifts, target_redshifts)
+        collect_halos.append(redshift_dict)
+    all_dictionaries_dict = list_to_dict(collect_halos, halos)
+    plot_histogram_profile(all_dictionaries_dict)
+    collect_profiles_plot(all_dictionaries_dict, red = "RD0042")
 
     pipe.run()
 
 main()
-
-
-
-
-
-
-# unit_dict = {'density':'g/cm**3',
-#                 'temperature':'/Tvir',
-#                 'metallicity':'Zsun',
-#                 'pressure':'erg/cm**3',
-#                 'entropy':'keV*cm**2',
-#                 'radial_velocity':'km/s'}
-
-# y_range_dict = {'density':[-32,-23],
-#                 #'temperature':[0.01,100],
-#                 'temperature':[4,7],
-#                 'metallicity':[-3,2],
-#                 'pressure':[-19,-12],
-#                 'entropy':[-5,5],
-#                 'radial_velocity':[-500,1000]}
-
-# label_dict = {'density':'log Density [g/cm$^3$]',
-#             'temperature':'$T/T_\\mathrm{vir}$',
-#             'metallicity':'log Metallicity [$Z_\\odot$]',
-#             'pressure':'log Pressure [erg/cm$^3$]',
-#             'entropy':'log Entropy [keV cm$^2$]',
-#             'radial_velocity':'Radial Velocity [km/s]'}
-
-
-
-    # ## Save to File
-    # f = open("density_profiles.txt", 'w')
-    # f.write('# radius (kpc)  Median %s (%s)  Mean %s (%s)\n' % ("density", "g/cm**3", "density", "g/cm**3"))
-    # for i in range(len(median_profile)):
-    #     f.write('%.3f             %.3e                   %.3e\n' % (radius_bin_centers[i], median_profile[i], mean_profile[i]))
-    # f.close()

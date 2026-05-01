@@ -1,7 +1,7 @@
 """
 This script processes simulation data from the FOGGIE project to analyze perturbations in the circumgalactic medium (CGM). It performs the following steps:
 1. Loads simulation datasets and creates a uniform 3D grid offest from the center as to not indlude the disk (only utilizing CGM)
-2. Normalizes fields by their respective profiles and means  to isolate fluctuations.
+2. Normalizes fields by their respective profiles and means to isolate fluctuations.
 3. Computes the 3D Fourier transform of the normalized fields to obtain power spectra.
 4. Radially averages the power spectra to analyze the distribution of perturbations across different scales.
 5. Plots the radially averaged power spectra for density and temperature across different halos and redshifts.
@@ -43,30 +43,31 @@ def pull_data(name, df, halo_n, z_dir, fields, gridsize=[100, 100, 100], left_ed
     xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
     distance_grid = np.sqrt((xx - center[0].value)**2 + (yy - center[1].value)**2 + (zz - center[2].value)**2) *ds.units.kpc
 
-    # Calculate average density by profile
-    print("Calculating density and temperature profiles...")
-    # Ensure we use the larger distance for outer sphere
-    outer_radius_kpc = max(abs(np.linalg.norm(left_edge_kpc)), abs(np.linalg.norm(right_edge_kpc)))
-    sph = ds.sphere(center, outer_radius_kpc*ds.units.kpc*2) # Spherical region for profiles
-    sph.set_field_parameter("center", center)  # Explicitly set center for radius calculations
-    profile_plots = yt.ProfilePlot(sph, ("index", "radius"), fields, n_bins=128, weight_field=None, x_log = False)
+    # # Calculate average density by profile
+    # print("Calculating density and temperature profiles...")
+    # # Ensure we use the larger distance for outer sphere
+    # outer_radius_kpc = max(abs(np.linalg.norm(left_edge_kpc)), abs(np.linalg.norm(right_edge_kpc)))
+    # sph = ds.sphere(center, outer_radius_kpc*ds.units.kpc*2) # Spherical region for profiles
+    # sph.set_field_parameter("center", center)  # Explicitly set center for radius calculations
+    # profile_plots = yt.ProfilePlot(sph, ("index", "radius"), fields, n_bins=128, weight_field=None, x_log = False)
 
-    print("Generating projection plot for verification...")
-    tghyt = yt.SlicePlot(ds, 'z', ('gas', 'density'), center=center, width=(outer_radius_kpc*4, 'kpc'), data_source=sph)
-    # Draw box with 4 lines
-    tghyt.annotate_line([left_edge[0]-center[0], left_edge[1] - center[1]], [right_edge[0]-center[0], left_edge[1] - center[1]], coord_system='plot')
-    tghyt.annotate_line([right_edge[0]-center[0], left_edge[1] - center[1]], [right_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
-    tghyt.annotate_line([right_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
-    tghyt.annotate_line([left_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], left_edge[1] - center[1]], coord_system='plot')
-    tghyt.save(f'../images/full_sphere_slice_halo{halo_n}_{z_dir}.png')
+    # print("Generating projection plot for verification...")
+    # tghyt = yt.SlicePlot(ds, 'z', ('gas', 'density'), center=center, width=(outer_radius_kpc*4, 'kpc'), data_source=sph)
+    # # Draw box with 4 lines
+    # tghyt.annotate_line([left_edge[0]-center[0], left_edge[1] - center[1]], [right_edge[0]-center[0], left_edge[1] - center[1]], coord_system='plot')
+    # tghyt.annotate_line([right_edge[0]-center[0], left_edge[1] - center[1]], [right_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
+    # tghyt.annotate_line([right_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], right_edge[1] - center[1]], coord_system='plot')
+    # tghyt.annotate_line([left_edge[0]-center[0], right_edge[1] - center[1]], [left_edge[0]-center[0], left_edge[1] - center[1]], coord_system='plot')
+    # tghyt.save(f'../images/full_sphere_slice_halo{halo_n}_{z_dir}.png')
 
     print("Data extraction complete.")
     return {
             "grid": {field: grid["gas", field] for field in fields},
             "box_size": (right_edge[0] - left_edge[0]).to('kpc'),
             "distance_grid": distance_grid.to('kpc'),
-            "profile_plots": {"radius": profile_plots.profiles[0].x.to("kpc"), **{field: profile_plots.profiles[0]["gas", field] for field in fields}}, 
-            "cell_depth": ((right_edge[0] - left_edge[0]) / gridsize[0]).to('cm')
+            # "profile_plots": {"radius": profile_plots.profiles[0].x.to("kpc"), **{field: profile_plots.profiles[0]["gas", field] for field in fields}}, 
+            "cell_depth": ((right_edge[0] - left_edge[0]) / gridsize[0]).to('cm'),
+            "grid_size": gridsize
             }
 
 @pipe.AddFunction(rerun = RERUN)
@@ -222,7 +223,7 @@ def main():
     Main function to process simulation data, compute power spectra, and generate plots.
     """
     # Define simulation dataset info
-    fields = ['density', 'temperature']
+    fields = ['density']
     target_redshifts = ["RD0016", "RD0020", "RD0027", "RD0032", "RD0042"]
     halos = ["002392", "002878", "004123", "005016", "005036", "008508"]
     NUM_BINS = 200
