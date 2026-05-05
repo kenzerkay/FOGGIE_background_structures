@@ -17,5 +17,6 @@ cd "${directory}"
 
  
 # mpirun -n 6 python ../FOGGIE_background_structures/smooth_FOGGIE_profiles.py
-mpirun -n 6 python ../FOGGIE_background_structures/perturbations.py
+# mpirun -n 6 python ../FOGGIE_background_structures/perturbations_NFFT.py #(7032722) (7034132)
+mpirun -n 6 python ../FOGGIE_background_structures/perturbations_SF.py #(7032760) (7034161) (7034288)
 # mpirun -n 30 python perturbations_in_foggie_sims.py   

@@ -4,20 +4,10 @@ from SetUp import *
 import yt
 import matplotlib as mpl
 from ndustria import Pipeline
-from scipy.spatial import cKDTree
+from numba import njit
 
 pipe = Pipeline(parallel=True)
 RERUN = False
-
-def density_cutoff(r_kpc):
-    """
-    Radial density cutoff in g/cm**3.
-    Tune these numbers for your halo.
-    """
-    r0 = 50.0  # kpc
-    rho0 = 1e-25
-    alpha = -4
-    return rho0 * (r_kpc / r0)**alpha
 
 @pipe.AddFunction(rerun = RERUN)
 def extract_sim_data(name, df, z_dir, weight_field=None):
@@ -37,7 +27,10 @@ def extract_sim_data(name, df, z_dir, weight_field=None):
     pos = np.column_stack([x, y, z])  # shape (N,3)
 
     # Evautate density cutoff for every cell 
-    rho_cutoff = density_cutoff(radius_dat)
+    r0 = 50.0  # kpc
+    rho0 = 1e-25
+    alpha = -4
+    rho_cutoff = rho0 * (radius_dat / r0)**alpha
     keep = density_dat < rho_cutoff
 
     # Define which data points to keep (below the cutoff) and which to cut (above the cutoff).
@@ -46,10 +39,6 @@ def extract_sim_data(name, df, z_dir, weight_field=None):
     density_data = density_dat[keep]
     pressure_data = pressure_dat[keep]
     position_data = pos[keep]
-
-    cut_radius_data = radius_dat[keep == False]
-    cut_data = density_dat[keep == False]
-    pressure_cut_data = pressure_dat[keep == False]
 
     # Decide if we want to weight the histogram by a field (e.g. mass) or not (i.e. all cells count equally).
     if weight_field is None:
@@ -62,6 +51,37 @@ def extract_sim_data(name, df, z_dir, weight_field=None):
             'Pressure': pressure_data,
             'Position': position_data,
             'Weight': weight_data}
+
+@njit(cache=True)
+def inner_power_spectrum(pos, w, V, ks_per_bin, nbins):
+
+    Pk = np.zeros(nbins)
+
+    for i in range(nbins):
+        ks = ks_per_bin[i]
+        modes = ks.shape[0]
+        mode_power_sum = 0.0
+
+        for m in range(modes):
+            kx = ks[m, 0]
+            ky = ks[m, 1]
+            kz = ks[m, 2]
+
+            real_sum = 0.0
+            imag_sum = 0.0
+
+            for j in range(pos.shape[0]):
+                phase = kx * pos[j, 0] + ky * pos[j, 1] + kz * pos[j, 2]
+                c = np.cos(phase)
+                s = np.sin(phase)
+                real_sum += w[j] * c
+                imag_sum -= w[j] * s
+
+            mode_power_sum += real_sum * real_sum + imag_sum * imag_sum
+
+        Pk[i] = (mode_power_sum / modes) / V
+
+    return Pk
 
 @pipe.AddFunction(rerun = RERUN)
 def compute_point_power_spectrum(dictionary, nbins=30, modes_per_bin=64, rng=None, keep_fraction=0.5):
@@ -79,9 +99,6 @@ def compute_point_power_spectrum(dictionary, nbins=30, modes_per_bin=64, rng=Non
     - This is O(N_cells * modes) and can be expensive for very large samples.
     """
 
-    if rng is None:
-        rng = np.random.default_rng()
-
     # read arrays
     pos = np.asarray(dictionary['Position'])
     dens = np.asarray(dictionary['Density'])
@@ -92,49 +109,42 @@ def compute_point_power_spectrum(dictionary, nbins=30, modes_per_bin=64, rng=Non
         raise ValueError("keep_fraction must be in (0, 1].")
     if keep_fraction < 1.0:
         n_total = pos.shape[0]
+        print(n_total, "cells before downsampling.")
         n_keep = max(2, int(np.ceil(n_total * keep_fraction)))
         idx = rng.choice(n_total, size=n_keep, replace=False)
         pos = pos[idx]
         dens = dens[idx]
         weight_field = weight_field[idx]
 
-    L = np.linalg.norm(pos.max(axis=0) - pos.min(axis=0))  # size of the sampled volume
+    span = pos.max(axis=0) - pos.min(axis=0)
+    L = np.linalg.norm(span)  # characteristic size of sampled domain
     w = (dens - np.mean(dens)) * (L**3 / len(pos))  # cell volume ~ total volume / N
     kmin = 2.0 * np.pi / L  # more robust than L if volume is irregular
     V = L**3
 
-    # approximate kmax from median nearest-neighbor separation
-    tree = cKDTree(pos)
-    dists, _ = tree.query(pos, k=2)
-    nn = dists[:, 1]
-    delta = np.median(nn)
+    # approximate kmax from mean inter-point spacing (no nearest-neighbor tree)
+    V_box = np.prod(span)
+    if V_box <= 0:
+        V_box = V
+    delta = (V_box / len(pos))**(1.0 / 3.0)
     kmax = np.pi / (delta + 1e-12)
+    kmax = max(kmax, 1.2 * kmin)
     kbins = np.logspace(np.log10(kmin), np.log10(kmax), nbins+1)
     k_centers = 0.5 * (kbins[:-1] + kbins[1:])
 
-    Pk = np.zeros(nbins)
-
+    ks_per_bin = np.empty((nbins, modes_per_bin, 3), dtype=np.float64)
     for i in range(nbins):
-        k0 = k_centers[i]
-        # sample random directions on the sphere
         u = rng.normal(size=(modes_per_bin, 3))
-        u /= np.linalg.norm(u, axis=1)[:, None]
-        ks = (k0 * u).astype(np.float64)  # shape (M,3)
+        norms = np.sqrt(np.sum(u * u, axis=1))
+        u /= norms[:, None]
+        ks_per_bin[i] = k_centers[i] * u
 
-        # compute dot products pos @ ks.T -> shape (Npts, M)
-        dots = pos.dot(ks.T)
-
-        # F for each mode: sum_j w_j * exp(-i k·x_j)
-        exps = np.exp(-1j * dots)
-        F_modes = np.dot(w, exps)  # shape (M,)
-        P_modes = np.abs(F_modes)**2
-
-        Pk[i] = P_modes.mean() / V
+    Pk = inner_power_spectrum(pos, w, V, ks_per_bin, nbins)
 
     return {"k": k_centers, "Pk": Pk}
 
 @pipe.AddFunction(rerun = RERUN)
-def plot_power_spectrum(all_halos):
+def plot_power_spectrum(all_halos, filename='power_spectrum.png'):
     """
     Plot the power spectrum P(k) vs physical scale in kpc for a given halo and redshift.
     """
@@ -150,41 +160,16 @@ def plot_power_spectrum(all_halos):
             dic = all_halos[h][z]
             scale_kpc = 2.0 * np.pi / np.asarray(dic["k"])
             order = np.argsort(scale_kpc)
-            ax.plot(scale_kpc[order], dic["Pk"][order] / np.max(dic["Pk"]), marker='o', linestyle='-', label=f'Halo {h} at {z}')
+            ax.plot(scale_kpc[order], dic["Pk"][order] / np.max(dic["Pk"]), marker='o', linestyle='-', label=f'Halo {h}')
+            if h == "004123" and z == "RD0042":
+                with open('power_spectrum_004123_RD0042.txt', 'w') as f:
+                    for k_val, pk_val in zip(dic["k"][order], dic["Pk"][order]):
+                        f.write(f"{k_val:.6e} {pk_val:.6e}\n")
+                
 
     ax.legend()
     fig.tight_layout()
-    fig.savefig(f'power_spectrum.png')
-
-@pipe.AddFunction(rerun = RERUN)
-def structure_function(dictionary, nbins=30, keep_fraction=0.5):
-    """
-    Compute the second-order structure function S2(r) = <|f(x+r) - f(x)|^2> for a field f (e.g. density).
-    This is an alternative to the power spectrum that can be more robust for irregular samples.
-    """
-
-    pos = np.asarray(dictionary['Position'])
-    field = np.asarray(dictionary['Density'])
-
-    tree = cKDTree(pos)
-    dists, idxs = tree.query(pos, k=nbins+1)  # include self (0 distance)
-    
-    S2 = np.zeros(nbins)
-    counts = np.zeros(nbins)
-
-    for i in range(pos.shape[0]):
-        for j in range(1, nbins+1):  # skip self
-            r = dists[i, j]
-            if r > 0:
-                dr = field[idxs[i, j]] - field[i]
-                S2[j-1] += dr**2
-                counts[j-1] += 1
-
-    with np.errstate(divide='ignore', invalid='ignore'):
-        S2 /= counts
-        r_bins = dists[:, 1:nbins+1].mean(axis=0)
-
-    return {"r": r_bins, "S2": S2}
+    fig.savefig(f'{filename}')
 
 @pipe.AddFunction(rerun = RERUN)
 def list_to_dict(dicts, names):
@@ -206,26 +191,29 @@ def main():
     """
     Main function to process simulation data, compute power spectra, and generate plots.
     """
+    rng = np.random.default_rng(42)
+
     # Define simulation dataset info
     target_redshifts = ["RD0042"] # ["RD0016" ,"RD0020", "RD0027", "RD0032", "RD0042"]
     halos = ["002392", "002878", "004123", "005016", "005036", "008508"]
-    NUM_BINS = 200
 
     collect_halos = []
     for halo_n in halos:
         z_dirs           = get_dirs(halo_n)
         df               = read_halo_c_v(z_dirs, halo_n)
+
         collect_redshifts = []
         for redshift in target_redshifts:
             name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
             dictionary = extract_sim_data(name, df, redshift, weight_field=None)
-            dic = compute_point_power_spectrum(dictionary, nbins=50, modes_per_bin=128, keep_fraction=0.25)
+            dic = compute_point_power_spectrum(dictionary, nbins=100, rng=rng, modes_per_bin=128, keep_fraction=0.2)
             collect_redshifts.append(dic)
-            all_redshifts = list_to_dict(collect_redshifts, target_redshifts)
+        
+        all_redshifts = list_to_dict(collect_redshifts, target_redshifts)
         collect_halos.append(all_redshifts)
-    all_halos = list_to_dict(collect_halos, halos)
 
-    plot_power_spectrum(all_halos)
+    all_halos = list_to_dict(collect_halos, halos)
+    plot_power_spectrum(all_halos, filename='power_spectrum_1.png')
 
     pipe.run()
 
