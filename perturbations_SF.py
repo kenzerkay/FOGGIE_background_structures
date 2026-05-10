@@ -39,7 +39,7 @@ def accumulate_structure_function(pos, field, pair_i, pair_j, r_edges, counts, s
         bin_index = left
         diff = field[j] - field[i]
         counts[bin_index] += 1
-        sums[bin_index] += diff * diff
+        sums[bin_index] += abs(diff)
 
 @pipe.AddFunction(rerun = RERUN)
 def extract_sim_data(name, df, z_dir, weight_field=None):
@@ -85,9 +85,9 @@ def extract_sim_data(name, df, z_dir, weight_field=None):
             'Weight': weight_data}
 
 @pipe.AddFunction(rerun = RERUN)
-def structure_function(dictionary, nbins=30, n_pairs=50000, rng=np.random.default_rng(42), batch_size=250000):
+def structure_function(dictionary, nbins=30, n_pairs=50000, rng=np.random.default_rng(42), batch_size=250):
     """
-    Compute the second-order structure function S2(r) = <|f(x+r) - f(x)|^2> for a field f (e.g. density).
+    Compute the second-order structure function S(r) = <|f(x+r) - f(x)|> for a field f (e.g. density).
     This version samples random point pairs across the full domain instead of only using local nearest neighbors.
     """
 
@@ -124,39 +124,39 @@ def structure_function(dictionary, nbins=30, n_pairs=50000, rng=np.random.defaul
         processed += m
 
     with np.errstate(divide='ignore', invalid='ignore'):
-        S2 = sums / counts
+        S = sums / counts
 
     r_bins = np.sqrt(r_edges[:-1] * r_edges[1:])
-    S2[counts == 0] = np.nan
+    S[counts == 0] = np.nan
 
-    return {"r": r_bins, "S2": S2}
+    return {"r": r_bins, "S": S}
 
 @pipe.AddFunction(rerun = RERUN)
 def plot_structure_function(all_halos, filename='structure_function.png'):
     """
-    Plot the structure function S2(r) vs scale r for a given halo and redshift.
+    Plot the structure function S(r) vs scale r for a given halo and redshift.
     """
 
     fig, ax = plt.subplots(figsize=(8,6))
     ax.set_xscale('log')
     ax.set_yscale('log')
     ax.set_xlabel('Scale [kpc]', fontsize=14)
-    ax.set_ylabel('S2(r)', fontsize=14)
+    ax.set_ylabel('S(r)', fontsize=14)
 
     for h in all_halos:
         for z in all_halos[h]:
             dic = all_halos[h][z]
             r = np.asarray(dic["r"])
-            s2 = np.asarray(dic["S2"])
-            valid = np.isfinite(r) & np.isfinite(s2)
+            s = np.asarray(dic["S"])
+            valid = np.isfinite(r) & np.isfinite(s) & (s > 0) & (r < 160) 
             if not np.any(valid):
                 continue
             order = np.argsort(r[valid])
-            ax.plot(r[valid][order], s2[valid][order] / np.nanmax(s2[valid]), marker='o', linestyle='-', label=f'Halo {h} at {z}')
+            ax.plot(r[valid][order], s[valid][order] / np.nanmax(s[valid]), marker='o', linestyle='-', label=f'Halo {h} at {z}')
             if h == "004123" and z == "RD0042":
                 with open('structure_function_004123_RD0042.txt', 'w') as f:
-                    for r_val, s2_val in zip(r[valid][order], s2[valid][order]):
-                        f.write(f"{r_val:.6e} {s2_val:.6e}\n")
+                    for r_val, s_val in zip(r[valid][order], s[valid][order]):
+                        f.write(f"{r_val:.6e} {s_val:.6e}\n")
 
     ax.legend()
     fig.tight_layout()
@@ -197,14 +197,14 @@ def main():
         for redshift in target_redshifts:
             name = f"/mnt/research/turbulence/FOGGIE/halo_{halo_n}/nref11c_nref9f/{redshift}/{redshift}"
             dictionary = extract_sim_data(name, df, redshift, weight_field=None)
-            dic_sf = structure_function(dictionary, nbins=100, n_pairs=1e11, rng=rng)
+            dic_sf = structure_function(dictionary, nbins=100, n_pairs=5e9, rng=rng)
             collect_structure_functions.append(dic_sf)
 
         all_structure_functions = list_to_dict(collect_structure_functions, target_redshifts)
         collect_SFs.append(all_structure_functions)
 
     all_SFs = list_to_dict(collect_SFs, halos)      
-    plot_structure_function(all_SFs, filename='structure_function_1e11.png')
+    plot_structure_function(all_SFs, filename='structure_function_5e9.png')
 
     pipe.run()
 

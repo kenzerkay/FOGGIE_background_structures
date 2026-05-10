@@ -152,20 +152,21 @@ def plot_power_spectrum(all_halos, filename='power_spectrum.png'):
     fig, ax = plt.subplots(figsize=(8,6))
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.set_xlabel('Scale [kpc] = 2π/k', fontsize=14)
+    ax.set_xlabel('Scale [kpc]', fontsize=14)
     ax.set_ylabel('P(k)', fontsize=14)
 
     for h in all_halos:
         for z in all_halos[h]:
             dic = all_halos[h][z]
-            scale_kpc = 2.0 * np.pi / np.asarray(dic["k"])
+            scale_kpc = 1/np.asarray(dic["k"])
+            print("Max Distance (kpc):", scale_kpc.max())
+            print("Min Distance (kpc):", scale_kpc.min())
             order = np.argsort(scale_kpc)
             ax.plot(scale_kpc[order], dic["Pk"][order] / np.max(dic["Pk"]), marker='o', linestyle='-', label=f'Halo {h}')
             if h == "004123" and z == "RD0042":
                 with open('power_spectrum_004123_RD0042.txt', 'w') as f:
                     for k_val, pk_val in zip(dic["k"][order], dic["Pk"][order]):
-                        f.write(f"{k_val:.6e} {pk_val:.6e}\n")
-                
+                        f.write(f"{k_val:.6e} {pk_val:.6e}\n")   
 
     ax.legend()
     fig.tight_layout()

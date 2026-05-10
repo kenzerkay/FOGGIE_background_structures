@@ -1,8 +1,8 @@
 #!/bin/bash --login
 
 #SBATCH --job-name=RerunAllAnalysis                                                                         # Job name
-#SBATCH --ntasks=30                                                                                         # Number of tasks   # SLURM defaults to 1 but we specify anyway
-#SBATCH --mem=1TB                                                                                        # Memory per node   # Specify "M" or "G" for MB and GB respectively
+#SBATCH --ntasks=6                                                                                          # Number of tasks   # SLURM defaults to 1 but we specify anyway
+#SBATCH --mem=200GB                                                                                         # Memory per node   # Specify "M" or "G" for MB and GB respectively
 #SBATCH --time=03:59:00                                                                                     # Wall time         # Format: "minutes", "hours:minutes:seconds",      # "days-hours", or "days-hours:minutes"
 #SBATCH --output=/mnt/research/galaxies-REU/ticoras/investigate_perturbations/slurm_outputs/%x-%j-SLURM.out # %x: job name, %j: job ID
 
@@ -15,7 +15,6 @@ conda activate FOGGIE_Background
 directory="/mnt/research/galaxies-REU/ticoras/investigate_perturbations/background"
 cd "${directory}"
 
- 
 # mpirun -n 6 python ../FOGGIE_background_structures/smooth_FOGGIE_profiles.py
 # mpirun -n 6 python ../FOGGIE_background_structures/perturbations_NFFT.py #(7032722) (7034132)
 mpirun -n 6 python ../FOGGIE_background_structures/perturbations_SF.py #(7032760) (7034161) (7034288)
