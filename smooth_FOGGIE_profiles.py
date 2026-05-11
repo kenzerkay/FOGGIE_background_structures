@@ -143,7 +143,6 @@ def plot_histogram_profile(dic):
 def collect_profiles_plot(dic, red):
     """Collect median and mean profiles across halos and redshifts for comparison.
     """
-
     # Average the median profiles across all halos for the target redshift.
     average_median_density = np.zeros_like(dic[list(dic.keys())[0]][red]["median_density"])
     average_median_pressure = np.zeros_like(dic[list(dic.keys())[0]][red]["median_pressure"])

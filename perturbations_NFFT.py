@@ -109,26 +109,27 @@ def compute_point_power_spectrum(dictionary, nbins=30, modes_per_bin=64, rng=Non
         raise ValueError("keep_fraction must be in (0, 1].")
     if keep_fraction < 1.0:
         n_total = pos.shape[0]
-        print(n_total, "cells before downsampling.")
         n_keep = max(2, int(np.ceil(n_total * keep_fraction)))
         idx = rng.choice(n_total, size=n_keep, replace=False)
         pos = pos[idx]
         dens = dens[idx]
         weight_field = weight_field[idx]
 
+
+    # Find Max and Min k based on the box
     span = pos.max(axis=0) - pos.min(axis=0)
     L = np.linalg.norm(span)  # characteristic size of sampled domain
     w = (dens - np.mean(dens)) * (L**3 / len(pos))  # cell volume ~ total volume / N
     kmin = 2.0 * np.pi / L  # more robust than L if volume is irregular
     V = L**3
 
-    # approximate kmax from mean inter-point spacing (no nearest-neighbor tree)
     V_box = np.prod(span)
     if V_box <= 0:
         V_box = V
     delta = (V_box / len(pos))**(1.0 / 3.0)
     kmax = np.pi / (delta + 1e-12)
-    kmax = max(kmax, 1.2 * kmin)
+
+    # Define kbins in log space from kmin to kmax
     kbins = np.logspace(np.log10(kmin), np.log10(kmax), nbins+1)
     k_centers = 0.5 * (kbins[:-1] + kbins[1:])
 
