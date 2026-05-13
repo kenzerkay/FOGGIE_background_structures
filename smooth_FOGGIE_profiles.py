@@ -72,7 +72,7 @@ def calculate_profiles(dic):
     """
 
     # Define radius bins for the profile plot.
-    radius_bins = np.linspace(5.0, 250.0, 200)
+    radius_bins = np.linspace(5.0, 300.0, 200)
 
     # Bin the radius data and calculate the log10 of the density data for the histogram.
     bin_indices = np.digitize(dic['Radius'], radius_bins)
